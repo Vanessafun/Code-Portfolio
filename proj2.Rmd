@@ -7,7 +7,7 @@ output: github_document
 Due by 11:59 pm on Friday, December 6th.
 
 ## Question 1
-#define a density function of bivariate gaussian,a random-walk MCMC algorithm is used to simulates observations from this density
+define a density function of bivariate gaussian,a random-walk MCMC algorithm is used to simulates observations from this density
 ```{r}
 library(ggplot2)
 library(magrittr)
@@ -45,7 +45,7 @@ ggplot(df,aes(x = x1s,y = x2s))+
 ## Question 2
 
 ### 2.1
-#variance of asmple is 1.132592,variance of t(20) is 1.11, they are pretty close,which means those samples are genuine draws from the correct Student-t(20) distribution.
+variance of asmple is 1.132592,variance of Student-t(20) is 1.11, they are pretty close,which means those samples are genuine draws from the correct Student-t(20) distribution.
 ```{r}
 set.seed(2)
 dstudentt <-function(y) {
@@ -71,7 +71,7 @@ print(20/18)
 ```
 
 ### 2.2
-#the sample variance(which is 2.81) is not close nor equal to student-t(3) theoretical variance(which is 3), one possible explanation is that convergence dosen't happen before the 10000th sample or happened really late, for example, untill the 7000th sample this MCMC converged, another explanation is that this MCMC's convergence is not Student-t(3) 
+the sample variance(which is 2.758434) is not close nor equal to student-t(3) theoretical variance(which is 3), one possible explanation is that convergence dosen't happen before the 10000th sample or happened really late, for example, untill the 7000th sample this MCMC converged, another explanation is that this MCMC's convergence is not Student-t(3) 
 ```{r}
 set.seed(2)
 dstudentt <-function(y) {
@@ -94,7 +94,6 @@ for (i in 2:n) {
 ys <- ys[-(1:100)]
 print(var(ys))
 print(3/1)
-hist(ys)
 ```
 
 
