@@ -1,14 +1,15 @@
----
-title: "Statisitical Programming - Project 2"
-author: "vanessafun"
-output: github_document
----
+Statisitical Programming - Project 2
+================
+vanessafun
 
 Due by 11:59 pm on Friday, December 6th.
 
 ## Question 1
-#define a density function of bivariate gaussian,a random-walk MCMC algorithm is used to simulates observations from this density
-```{r}
+
+define a density function of bivariate gaussian,a random-walk MCMC
+algorithm is used to simulates observations from this density
+
+``` r
 library(ggplot2)
 library(magrittr)
 dbigaussian <-function(x1,x2) {
@@ -41,12 +42,17 @@ ggplot(df,aes(x = x1s,y = x2s))+
   labs(title = "contour of bigaussian")
 ```
 
+![](proj2_files/figure-gfm/unnamed-chunk-1-1.png)<!-- -->
 
 ## Question 2
 
 ### 2.1
-#variance of asmple is 1.132592,variance of t(20) is 1.11, they are pretty close,which means those samples are genuine draws from the correct Student-t(20) distribution.
-```{r}
+
+variance of asmple is 1.132592,variance of Student-t(20) is 1.11, they
+are pretty close,which means those samples are genuine draws from the
+correct Student-t(20) distribution.
+
+``` r
 set.seed(2)
 dstudentt <-function(y) {
   v <- 20
@@ -67,12 +73,25 @@ for (i in 2:n) {
 }
 ys <- ys[-(1:100)]
 print(var(ys))
+```
+
+    ## [1] 1.132592
+
+``` r
 print(20/18)
 ```
 
+    ## [1] 1.111111
+
 ### 2.2
-#the sample variance(which is 2.81) is not close nor equal to student-t(3) theoretical variance(which is 3), one possible explanation is that convergence dosen't happen before the 10000th sample or happened really late, for example, untill the 7000th sample this MCMC converged, another explanation is that this MCMC's convergence is not Student-t(3) 
-```{r}
+
+the sample variance(which is 2.758434) is not close nor equal to
+student-t(3) theoretical variance(which is 3), one possible explanation
+is that convergence dosen’t happen before the 10000th sample or happened
+really late, for example, untill the 7000th sample this MCMC converged,
+another explanation is that this MCMC’s convergence is not Student-t(3)
+
+``` r
 set.seed(2)
 dstudentt <-function(y) {
   v <- 3
@@ -93,67 +112,34 @@ for (i in 2:n) {
 }
 ys <- ys[-(1:100)]
 print(var(ys))
-print(3/1)
-hist(ys)
 ```
 
+    ## [1] 2.758434
 
+``` r
+print(3/1)
+```
+
+    ## [1] 3
 
 ## Question 3
 
-```{r message=FALSE}
+``` r
 y = scan("data/eventtimes.csv", sep=",")
 ```
 
 ### 3.1
 
-
 ### 3.2
-
-```{r}
-
-```
-
 
 ### 3.3
 
-```{r}
-
-```
-
 ### 3.4
-
-```{r}
-
-```
-
 
 ### 3.5
 
-```{r}
-
-```
-
-
 ### 3.6
-
-```{r}
-
-```
-
 
 ### 3.7
 
-```{r}
-
-```
-
-
-
 ### 3.8
-
-```{r}
-
-```
-
-
