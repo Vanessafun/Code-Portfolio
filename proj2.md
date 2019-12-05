@@ -6,7 +6,7 @@ Due by 11:59 pm on Friday, December 6th.
 
 ## Question 1
 
-first,define a density function of bivariate gaussian, then a
+First,define a density function of bivariate gaussian, then a
 random-walk MCMC algorithm is used to simulates observations from this
 density. And there’s a contour plot of this bivariate density function
 in the bottom.
@@ -90,7 +90,7 @@ print(20 / 18)#variance of Student-t(20)
 
 ### 2.2
 
-the sample variance(which is 2.758434) is not close nor equal to
+The sample variance(which is 2.758434) is not close nor equal to
 student-t(3) theoretical variance(which is 3), one possible explanation
 is that this MCMC’s convergence(statinary distribution) is not
 Student-t(3). Another explanation is that stationary dosen’t happen
@@ -137,7 +137,7 @@ y = scan("data/eventtimes.csv", sep=",")
 
 ### 3.1
 
-define the loglikelihood function
+Define the loglikelihood function
 
 ``` r
 loglikeli <- function(k){
