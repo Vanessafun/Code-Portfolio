@@ -1,8 +1,6 @@
-Statisitical Programming - Project 2
+Statisitical Programming - MCMC simulation
 ================
 vanessafun
-
-Due by 11:59 pm on Friday, December 6th.
 
 ## Question 1
 
