@@ -1,0 +1,881 @@
+---
+title: "BayesA02"
+author: "Wenyi Fang"
+date: "4/6/2020"
+output:
+  word_document: default
+  html_document: default
+---
+
+#read data 
+```{r}
+setwd("/Users/vanessafung/Desktop")
+Avalanches = read.csv("Avalanches.csv",header = TRUE, sep=";",fileEncoding="UTF-8-BOM")
+Avalanches_part2<-read.csv("Avalanches_part2.csv",header = TRUE, sep=";",fileEncoding="UTF-8-BOM")
+```
+
+#libray packages
+```{r}
+library(MCMCpack)
+library(magrittr)
+require(rjags)
+library(coda)
+library(tidyverse)
+library(tibble)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(ggplot2)
+library(data.table)
+library(caret)
+library(lmtest)
+library(runjags)
+library(ggcorrplot)
+```
+#Problem 01
+#01-(a)Add to the dataset two dummy variables called EADS1 and EADS2, exploratory analysis
+#any other way of exploratory?
+#comment: ratio = deaths/rep.events has a decreasing trend,during 1986-1993 and 1994-2003,when reported events increased suddenly, deaths would rush up,even exceed over 1 in 1991 and 1994, therefore death rate fluctuated a lot during 1986-1993 and 1994-2003. But during 2004-2019, death rate decrease to a low level （around 0.4) and fluctuate less
+```{r}
+#define dummies
+Avalanches[, "EADS1"] = if_else(Avalanches$Season <= 2003 &
+                                  Avalanches$Season >= 1994, 1, 0)
+Avalanches[, "EADS2"] = if_else(Avalanches$Season >= 2004, 1, 0)
+
+Avalanches[,"Season.period"] = as.character()
+Avalanches[,"Season.period"][1:8] = "1986-1993"
+Avalanches[,"Season.period"][9:18] = "1994-2003"
+Avalanches[,"Season.period"][19:34] = "2004-"
+
+
+#row relative to 1986,1994,2004
+sub.3.years = Avalanches[c(
+  which(Avalanches$Season == 1986),
+  which(Avalanches$Season == 1994),
+  which(Avalanches$Season == 2004)
+), ]
+sub.3.years
+
+#exploratory analysis
+sum.avalanches = summary(Avalanches[, c(2, 3)])
+sum.avalanches
+corr.event.death = cor(Avalanches[, 2], Avalanches[, 3])
+corr.event.death
+
+death.ratio.trend = ggplot(Avalanches, aes(x = Season, y = Deaths / Rep.events)) +
+  geom_line() +
+  geom_point() +
+  xlim(1986, 2019) +
+  geom_vline(xintercept = c(1993, 2004),
+             color = "red",
+             alpha = 0.5)+
+  geom_text(aes(x = 1993,y = 1.35,label = "1993"),col = "red")+
+  geom_text(aes(x = 2004,y = 1.35,label = "2004"),col = "red")
+
+box.periods = ggplot(Avalanches,aes(x = Season.period,y = Deaths,group = Season.period))+
+  geom_boxplot( )
+#  geom_boxplot(aes(x = 9:18,y = Deaths[9:18]))+
+#  geom_boxplot(aes(x = 19:34,y = Deaths[19:34]))
+
+box.periods
+
+#graph
+events.season.line = ggplot(Avalanches, aes(x = Season)) +
+  geom_line(aes(y = Rep.events), color = "#FF9999") +
+  geom_text(
+    data = Avalanches[Avalanches$Season == 2014, ],
+    aes(y = Rep.events, label = "Rep.events"),
+    color = "#CC79A7",
+    size = 5
+  ) +
+  geom_line(aes(y = Deaths), color = "#0072B2", alpha = 0.7) +
+  geom_text(
+    data = Avalanches[Avalanches$Season == 2014, ],
+    aes(y = Deaths, label = "Deaths"),
+    color = "#0072B2",
+    size = 5
+  ) +
+  geom_area(aes(y = Deaths), fill = "#0072B2", alpha = 0.5) +
+  geom_area(aes(y = Rep.events), fill = "#FF9999", alpha = 0.1) +
+  geom_vline(xintercept = c(1993, 2004), color = "#D55E00") +
+  geom_text(aes(x = 1993,y = 15,label = "1993"),col = "#D55E00")+
+  geom_text(aes(x = 2004,y = 15),col = "#D55E00",label = "2004")+
+  ylab("Reported events or Deaths")
+
+death.ratio.trend
+events.season.line
+```
+
+death.ratio.trend
+events.season.line
+
+#01-(b)
+```{r}
+#Data block and Initial Values
+n = length(Avalanches$Season)
+Avalanches.data = list(
+  n = n,
+  Deaths = Avalanches$Deaths,
+  Events = Avalanches$Rep.events,
+  ind.period1 = Avalanches$EADS1,
+  ind.period2 = Avalanches$EADS2
+)
+Avalanches.inits <- list(
+  list(
+    beta0 = -1,
+    beta1 = -1,
+    beta2 = -1,
+    beta3 = -1
+  ),
+  list(
+    beta0 = 0,
+    beta1 = 1,
+    beta2 = 2,
+    beta3 = 3
+  ),
+  list(
+    beta0 = 3,
+    beta1 = 2,
+    beta2 = 1,
+    beta3 = 0
+  )
+)
+
+#model statement
+Avalnches.model <- "model {
+# Hyperparameters
+beta.mu.0 <- 0
+beta.tau.0 <- 0.001
+
+# prior
+beta0 ~ dnorm(beta.mu.0,beta.tau.0)
+beta1 ~ dnorm(beta.mu.0,beta.tau.0)
+beta2 ~ dnorm(beta.mu.0,beta.tau.0)
+beta3 ~ dnorm(beta.mu.0,beta.tau.0)
+
+#Likelihood
+for(i in 1:n) {
+# Note: link function on LHS of fn assignment
+log(mu[i]) <- beta0+beta1*(Events[i]-mean(Events[]))+beta2*ind.period1[i]+beta3*ind.period2[i]
+Deaths[i] ~ dpois(mu[i])
+}
+}"
+
+# Run JAGS to the completion of the "adaption" stage
+results.Avalanches.A <-
+  jags.model(
+    file = textConnection(Avalnches.model),
+    data = Avalanches.data,
+    inits = Avalanches.inits,
+    n.chains = 3
+  )
+
+# Burn-in of 10000 iterations
+update(results.Avalanches.A, n.iter = 5000)
+
+# Longer run for making inferences, assuming chains have converged
+results.Avalanches.B <- coda.samples(
+  results.Avalanches.A,
+  variable.names = c("beta0", "beta1", "beta2", "beta3"),
+  n.iter = 10000
+)
+
+
+#MCMC Convergence Diagnostics
+
+# Trace plots and density
+plot(results.Avalanches.B)
+
+# Brooks-Gelman-Rubin statistic (want a value near 1)
+gelman.plot(results.Avalanches.B)
+
+#"mixing"- effective sample size given 10,000
+effectiveSize(results.Avalanches.B[[1]][, "beta0"])
+effectiveSize(results.Avalanches.B[[1]][, "beta1"])
+effectiveSize(results.Avalanches.B[[1]][, "beta2"])
+effectiveSize(results.Avalanches.B[[1]][, "beta3"])
+
+#ACF plot
+{
+  autocorr.plot(results.Avalanches.B[[1]][, "beta0"], main = "Intercept")
+  autocorr.plot(results.Avalanches.B[[1]][, "beta1"], main = "Slope1")
+  autocorr.plot(results.Avalanches.B[[1]][, "beta2"], main = "Slope2")
+  autocorr.plot(results.Avalanches.B[[1]][, "beta3"], main = "Slope3")
+}
+
+#look at MCMC summary
+summary(results.Avalanches.B)
+
+fit.events.b = as.data.frame(combine.mcmc(results.Avalanches.B))
+mean(exp(fit.events.b$beta0))# 3.419887
+mean(exp(fit.events.b$beta1))#1.216833
+mean(exp(fit.events.b$beta2))#0.9231521
+mean(exp(fit.events.b$beta3))# 0.4125329
+
+```
+
+#01-(c)
+```{r}
+#post_mu when rep.events = 20, EADS1=0,EADS2 = 1
+post_mu = exp(
+  fit.events.b$beta0 + fit.events.b$beta1 * (20 - mean(Avalanches$Rep.events)) +
+    fit.events.b$beta2 * 0 + fit.events.b$beta3 * 1
+)
+mean(post_mu)
+quantile (post_mu,c(0.025,0.975))
+#prob of mu<15
+prob.less.15 = length(which(post_mu < 16)) / length(post_mu)
+prob.less.15
+
+
+#c-2-Solution1
+#set event = 1,a constant number
+#0,0
+post_mu2 = exp(
+  fit.events.b$beta0 + fit.events.b$beta1 * (1 - mean(Avalanches$Rep.events)) + fit.events.b$beta2 *0 + fit.events.b$beta3 * 0
+)
+prob.more.1.period1 = length(which(post_mu2 > 1)) / length(post_mu2)
+prob.more.1.period1#0.82
+
+#1,0
+post_mu3 = exp(
+  fit.events.b$beta0 + fit.events.b$beta1 *  (1 - mean(Avalanches$Rep.events)) + fit.events.b$beta2 *
+    1 + fit.events.b$beta3 * 0
+)
+prob.more.1.period2 = length(which(post_mu3 > 1)) / length(post_mu3)
+prob.more.1.period2#0.67
+
+#0,1
+post_mu4 = exp(fit.events.b$beta0 + fit.events.b$beta1 * (1 - mean(Avalanches$Rep.events)) + fit.events.b$beta2 *
+                 0 + fit.events.b$beta3 * 1)
+prob.more.1.period3 = length(which(post_mu4 > 1)) / length(post_mu4)
+prob.more.1.period3#0.018
+
+
+#c-2-solution2
+mu.eachevent = function(ind1,ind2){
+  logmu = as.numeric()
+  for (i in 1:length(Avalanches$Rep.events)){
+  logmu[i] = fit.events.b$beta0 + fit.events.b$beta1 * (Avalanches$Rep.events[i]-mean(Avalanches$Rep.events)) + fit.events.b$beta2 *ind1 + fit.events.b$beta3 * ind2
+  }
+  return(exp(logmu))
+}
+
+#calculate each obs average deaths (mu)  based on beta estimation
+mu.period1 = mu.eachevent(0,0)
+mu.period2 = mu.eachevent(1,0)
+mu.period3 = mu.eachevent(0,1)
+
+#calculate group mean of mu for each periods as the estimate of poisson dist parameter
+mu.period1.mean = mean(mu.period1)
+mu.period2.mean = mean(mu.period2)
+mu.period3.mean = mean(mu.period3)
+
+#use qpois to calculate probability
+prob.more.1.period1 = 1-ppois(1,mu.period1.mean)
+prob.more.1.period2 = 1-ppois(1,mu.period2.mean)
+prob.more.1.period3 = 1-ppois(1,mu.period3.mean)
+prob.more.1.period1;prob.more.1.period2;prob.more.1.period3
+```
+
+#01-(d)
+```{r}
+# ---- Bayesian model
+# Poisson Model
+Avalanches.d.data <- list(n = nrow(Avalanches), Deaths = Avalanches$Deaths, EADS1 = Avalanches$EADS1, EADS2 = Avalanches$EADS2)
+
+# Create initial values for JAGS
+num.chains <- 3
+Avalanches.d.inits <- function(){
+  log_fi <- rnorm(1,0,10)
+  beta0 <- rnorm(1,0,10)
+  beta1 <- rnorm(1,0,10)
+  beta2 <- rnorm(1,0,10)
+  return( list(log_fi = log_fi, beta0=beta0, beta1=beta1, beta2=beta2) )
+}
+
+# Create model block for JAGS
+Avalanches.d.model <- "model {
+
+# prior
+log_fi ~ dnorm(0, 0.25)
+beta0 ~ dnorm(0, 0.001)
+beta1 ~ dnorm(0, 0.001)
+beta2 ~ dnorm(0, 0.001)
+
+#Likelihood
+for(i in 1:n) {
+log(mu[i]) <- beta0 + log_fi + beta1*EADS1[i] + beta2*EADS2[i]
+Deaths[i] ~ dpois(mu[i]) }
+}"
+
+# Run JAGS to the completion of the "adaption" stage
+results.Avalanches.d.A <- jags.model(file = textConnection(Avalanches.d.model), data = Avalanches.d.data, inits = Avalanches.d.inits, n.chains = num.chains, quiet = TRUE)
+update(results.Avalanches.d.A, n.iter = 20000)
+results.Avalanches.d.B <- coda.samples(results.Avalanches.d.A, variable.names = "log_fi", n.iter = 50000)
+
+# posterior estimates for log_phi
+fit.Avalanches.d<- as.data.frame(combine.mcmc(results.Avalanches.d.B))
+cat("The probability of absolute value of log_phi less than 4: ", mean(abs(fit.Avalanches.d$log_fi) <= log(4)), "\n")
+length(which(fit.Avalanches.d$log_fi>=5&fit.Avalanches.d$log_fi<=15))/length(fit.Avalanches.d$log_fi)
+
+# posterior estimates for beta_rep.events
+beta_posterior <- as.matrix(1/(Avalanches$Rep.events-mean(Avalanches$Rep.events)))%*%t(as.matrix(fit.Avalanches.d$log_fi))
+cat("The probability of absolute value of beta_repevents less than log(4)/5: ", mean(abs(beta_posterior) <= log(4)/5))
+exp(-4)
+```
+
+#01-(e)
+```{r}
+#Data block and Initial Values
+n = length(Avalanches$Season)
+Avalanches.data = list(n=n,Deaths = Avalanches$Deaths, Events = Avalanches$Rep.events,ind.period1 = Avalanches$EADS1,ind.period2 = Avalanches$EADS2)
+Avalanches.extratheta.inits = list(
+  list(beta0 = -1,
+    beta1 = -1,
+    beta2 = -1,
+    beta3 = -1),
+  list(beta0 = 0,
+    beta1 = 1,
+    beta2 = 2,
+    beta3 = 3),
+  list( beta0 = 3,
+    beta1 = 2,
+    beta2 = 1,
+    beta3 = 0)
+)
+#Extra variance model statement
+Avalnches.extra.variance.model <- "model {
+# Hyperparameters
+beta.mu.0 <- 0
+beta.tau.0 <- 0.01
+theta.mu.0 <- 0
+theta.se ~ dunif(0,10)
+theta.tau <- 1/pow(theta.se,2)
+
+# prior
+beta0 ~ dnorm(beta.mu.0,beta.tau.0)
+beta1 ~ dnorm(beta.mu.0,beta.tau.0)
+beta2 ~ dnorm(beta.mu.0,beta.tau.0)
+beta3 ~ dnorm(beta.mu.0,beta.tau.0)
+
+#Likelihood
+for(i in 1:n) {
+log(mu[i]) <- beta0+beta1*(Events[i]-mean(Events[]))+beta2*ind.period1[i]+beta3*ind.period2[i]+theta[i]
+Deaths[i] ~ dpois(mu[i])
+theta[i] ~ dnorm(theta.mu.0,theta.tau)
+}
+}"
+
+# Run JAGS to the completion of the "adaption" stage
+results.Avalanches.extratheta.A <-
+  jags.model(
+    file = textConnection(Avalnches.extra.variance.model),
+    data = Avalanches.data,
+    inits = Avalanches.extratheta.inits,
+    n.chains = 3
+  )
+
+# Burn-in of 10000 iterations
+update(results.Avalanches.extratheta.A, n.iter = 10000)
+
+# Longer run for making inferences, assuming chains have converged
+results.Avalanches.extratheta.B <- coda.samples(
+  results.Avalanches.extratheta.A,
+  variable.names = c("beta0", "beta1", "beta2", "beta3","theta"),
+  thin = 50,
+  n.iter = 50000
+)
+
+
+#MCMC Convergence Diagnostics
+
+# Trace plots and density
+plot(results.Avalanches.extratheta.B)
+
+# Brooks-Gelman-Rubin statistic (want a value near 1)
+gelman.plot(results.Avalanches.extratheta.B)
+
+#"mixing"- effective sample size given 10,000
+effectiveSize(results.Avalanches.extratheta.B[[1]][, "beta0"])
+effectiveSize(results.Avalanches.extratheta.B[[1]][, "beta1"])
+effectiveSize(results.Avalanches.extratheta.B[[1]][, "beta2"])
+effectiveSize(results.Avalanches.extratheta.B[[1]][, "beta3"])
+
+
+#ACF plot
+{autocorr.plot(results.Avalanches.extratheta.B[[1]][, "beta0"], main = "Intercept")
+autocorr.plot(results.Avalanches.extratheta.B[[1]][, "beta1"], main = "Slope1")
+autocorr.plot(results.Avalanches.extratheta.B[[1]][, "beta2"], main = "Slope2")
+autocorr.plot(results.Avalanches.extratheta.B[[1]][, "beta3"], main = "Slope3")
+}
+
+#look at MCMC summary
+summary(results.Avalanches.extratheta.B)
+
+fit.events.e = as.data.frame(combine.mcmc(results.Avalanches.extratheta.B))
+mean(exp(fit.events.e$beta0))# 3.419887
+mean(exp(fit.events.e$beta1))#1.216833
+mean(exp(fit.events.e$beta2))#0.9231521
+mean(exp(fit.events.e$beta3))# 0.4125329
+```
+
+#01-(f)
+```{r}
+#1(b）
+
+#plots
+post.mu.mean.b = colMeans(post.mu.b)
+post.mu.mean.e = colMeans(post.mu.e)
+
+quantile.90 = function(x){
+  quantile(x,c(0.05,0.95))
+}
+post.mu.quantile.b = apply(post.mu.b, 2, quantile.90)
+post.mu.quantile.e = apply(post.mu.e, 2, quantile.90)
+
+
+#plot for b
+post.avalanches.b.df = data.frame(
+  Avalanches,
+  post.mu.mean.b,
+  quantile.05 = post.mu.quantile.b[1,],
+  quantile.95 = post.mu.quantile.b[2,]
+)
+
+post.mu.graph.b = ggplot(post.avalanches.b.df,aes(x=Season,y = post.mu.mean.b))+
+  geom_line(col = "#0072B2") +
+  geom_line(aes(y = quantile.05),linetype = "longdash",col = "#D55E00")+
+  geom_line(aes(y = quantile.95),linetype = "longdash",col = "#D55E00")
+  
+post.mu.graph.b
+
+#plot for e
+post.avalanches.e.df = data.frame(
+  Avalanches,
+  post.mu.mean.e,
+  quantile.05 = post.mu.quantile.e[1,],
+  quantile.95 = post.mu.quantile.e[2,]
+)
+
+post.mu.graph.e = ggplot(post.avalanches.e.df,aes(x=Season,y = post.mu.mean.e))+
+  geom_line(col = "#0072B2") +
+  geom_line(aes(y = quantile.05),linetype = "longdash",col = "#D55E00")+
+  geom_line(aes(y = quantile.95),linetype = "longdash",col = "#D55E00")
+  
+post.mu.graph.e
+
+#DIC p18 
+dic.no.theta <- dic.samples(model=results.Avalanches.A,n.iter=10000,type="pD")
+dic.w.theta <- dic.samples(model=results.Avalanches.extratheta.A,n.iter=10000,type="pD")
+diffdic(dic.no.theta,dic.w.theta)#positive ,the second one is better
+
+
+events.season.line
+post.mu.graph.b
+post.mu.graph.e
+
+```
+
+
+#Problem02
+#02-(a)
+```{r}
+Avalanches_part2$Snow_total = Avalanches_part2$Snow_total/100
+Avalanches_part2$Snow_days = Avalanches_part2$Snow_days/14
+head(Avalanches_part2,5)
+
+#plot
+a1 = ggplot(Avalanches_part2,aes(x = Season,y=death.rate,group = Season))+
+  geom_boxplot(aes(y = Snow_total),col = "#0072B2")+
+  geom_boxplot(aes(y = Snow_days),col = "#FF9999")+
+  ylab("Snow_total or Snow_days")+
+  geom_text(
+    data = Avalanches_part2[Avalanches_part2$Season == 2019, ],
+    aes(y = 14, label = "Snow Days"),
+    color = "#FF9999",
+    size = 5
+  )+
+  geom_text(
+    data = Avalanches_part2[Avalanches_part2$Season == 2019, ],
+    aes(y = 13, label = "Snow Total"),
+    color = "#0072B2",
+    size = 5
+  )
+a1
+
+corr <- round(cor(Avalanches_part2[,c(2,7,8)]), 1)
+a2 = ggcorrplot(corr)
+a2
+
+```
+
+
+#2(b)
+```{r}
+# Data block #includes hyperparameters
+n = length(Avalanches_part2$Event_ID)
+death.hier.b.data <- list(n=n,Season=Avalanches_part2$Season,
+Snow_total=Avalanches_part2$Snow_total,Snow_days = Avalanches_part2$Snow_days,hit = Avalanches_part2$Hit,
+Geo.space=Avalanches_part2$Geo_space,y.dead = Avalanches_part2$Deaths,
+J=max(Avalanches_part2$Geo_space))
+
+# Initial values
+death.hier.b.inits <- function(){
+list(fi=rnorm(max(Avalanches_part2$Geo_space), 0,runif(1,0,10)),
+beta1=rnorm(1,0,sqrt(10)),
+beta2=rnorm(1,0,sqrt(10)),
+beta3=rnorm(1,0,sqrt(10)))
+}
+
+deathrate.b.model <- "model{
+#likelihood
+for(i in 1:n) {
+logit(mu[i]) <- fi[Geo.space[i]] + beta1*(Season[i] - mean(Season[])) + beta2*(Snow_total[i] - mean(Snow_total[])) + beta3*(Snow_days[i]- mean(Snow_days[]))
+y.dead[i] ~ dbin(mu[i],hit[i])
+}
+
+
+#Prior for random effect
+for(j in 1:J){
+ fi[j] ~ dnorm(0,1/pow(fi.se,2))
+}
+
+#hyperparameters and hyperprior
+beta.mu.0= 0
+beta.tau.0 = 0.1
+fi.se ~ dunif(0,10)
+
+#prior for beta
+beta1 ~ dnorm(beta.mu.0,beta.tau.0)
+beta2 ~ dnorm(beta.mu.0,beta.tau.0)
+beta3 ~ dnorm(beta.mu.0,beta.tau.0)
+
+ }"
+
+death.hier.res.b.A <- jags.model(file=textConnection(deathrate.b.model), data=death.hier.b.data, inits=death.hier.b.inits, n.chains=3, quiet = TRUE)
+update(death.hier.res.b.A, n.iter=2000) 
+death.hier.res.b.B <- coda.samples(death.hier.res.b.A,
+variable.names=c("fi","beta1","beta2","beta3"), n.iter=10000)
+```
+
+```{r}
+
+#MCMC Convergence Diagnostics
+
+# Trace plots and density
+plot(death.hier.res.b.B)
+
+# Brooks-Gelman-Rubin statistic (want a value near 1)
+gelman.plot(death.hier.res.b.B)
+
+#"mixing"- effective sample size given 10,000
+effectiveSize(death.hier.res.b.B[[1]][, "beta1"])
+effectiveSize(death.hier.res.b.B[[1]][, "beta2"])
+effectiveSize(death.hier.res.b.B[[1]][, "beta3"])
+effectiveSize(death.hier.res.b.B[[1]][, "fi[1]"])
+effectiveSize(death.hier.res.b.B[[1]][, "fi[2]"])
+effectiveSize(death.hier.res.b.B[[1]][, "fi[3]"])
+
+#ACF plot
+{
+autocorr.plot(death.hier.res.b.B[[1]][, "beta1"], main = "Slope1")
+autocorr.plot(death.hier.res.b.B[[1]][, "beta2"], main = "Slope2")
+autocorr.plot(death.hier.res.b.B[[1]][, "beta3"], main = "Slope3")
+autocorr.plot(death.hier.res.b.B[[1]][,"fi[1]"], main = "random effect 1")
+autocorr.plot(death.hier.res.b.B[[1]][,"fi[2]"], main = "random effect 2")
+autocorr.plot(death.hier.res.b.B[[1]][,"fi[3]"], main = "random effect 3")
+}
+
+#look at MCMC summary
+summary(death.hier.res.b.B)
+
+death.hier.b = as.data.frame(combine.mcmc(death.hier.res.b.B))
+
+```
+
+#02-(c)
+```{r}
+# Data block #includes hyperparameters
+n = length(Avalanches_part2$Event_ID)
+death.hier.c.data <- list(n=n,Season=Avalanches_part2$Season,
+Snow_total=Avalanches_part2$Snow_total,hit = Avalanches_part2$Hit,
+Geo.space=Avalanches_part2$Geo_space,y.dead = Avalanches_part2$Deaths,
+J=max(Avalanches_part2$Geo_space))
+
+# Initial values
+death.hier.c.inits <- function(){
+list(fi=rnorm(max(Avalanches_part2$Geo_space), 0,runif(1,0,10)),
+beta1=rnorm(1,0,sqrt(10)),
+beta2=rnorm(1,0,sqrt(10)))
+}
+
+deathrate.c.model <- "model{
+#likelihood
+for(i in 1:n) {
+logit(mu[i]) <- fi[Geo.space[i]] + beta1*(Season[i] - mean(Season[])) + beta2*(Snow_total[i] - mean(Snow_total[]))
+y.dead[i] ~ dbin(mu[i],hit[i])
+}
+
+
+#Prior for random effect
+for(j in 1:J){
+ fi[j] ~ dnorm(0,1/pow(fi.se,2))
+}
+
+#hyperparameters and hyperprior
+beta.mu.0= 0
+beta.tau.0 = 0.1
+fi.se ~ dunif(0,10)
+
+#prior for beta
+beta1 ~ dnorm(beta.mu.0,beta.tau.0)
+beta2 ~ dnorm(beta.mu.0,beta.tau.0)
+
+ }"
+
+death.hier.res.c.A <- jags.model(file=textConnection(deathrate.c.model), data=death.hier.c.data, inits=death.hier.c.inits, n.chains=3, quiet = TRUE)
+update(death.hier.res.c.A, n.iter=2000) 
+death.hier.res.c.B <- coda.samples(death.hier.res.c.A,
+variable.names=c("fi","beta1","beta2"), n.iter=10000)
+```
+
+```{r}
+#MCMC Convergence Diagnostics
+
+# Trace plots and density
+plot(death.hier.res.c.B)
+
+# Brooks-Gelman-Rubin statistic (want a value near 1)
+gelman.plot(death.hier.res.c.B)
+
+#"mixing"- effective sample size given 10,000
+effectiveSize(death.hier.res.c.B[[1]][, "beta1"])
+effectiveSize(death.hier.res.c.B[[1]][, "beta2"])
+effectiveSize(death.hier.res.c.B[[1]][, "fi[1]"])
+effectiveSize(death.hier.res.c.B[[1]][, "fi[2]"])
+effectiveSize(death.hier.res.c.B[[1]][, "fi[3]"])
+
+#ACF plot
+{
+autocorr.plot(death.hier.res.c.B[[1]][, "beta1"], main = "Slope1")
+autocorr.plot(death.hier.res.c.B[[1]][, "beta2"], main = "Slope2")
+autocorr.plot(death.hier.res.c.B[[1]][,"fi[1]"], main = "random effect 1")
+autocorr.plot(death.hier.res.c.B[[1]][,"fi[2]"], main = "random effect 2")
+autocorr.plot(death.hier.res.c.B[[1]][,"fi[3]"], main = "random effect 3")
+}
+
+#look at MCMC summary
+summary(death.hier.res.c.B)
+
+death.hier.c = as.data.frame(combine.mcmc(death.hier.res.c.B))
+#dic.1c = dic.samples(model=death.hier.res.c.B,n.iter=10000,type="pD")
+
+```
+
+#2-(d)
+```{r}
+invlogit <- function(x){1/(1+exp(-x))}
+#1,1,2015
+linear.comb.2c.1 = death.hier.c$`fi[1]` + death.hier.c$beta1*(2015 - mean(Avalanches_part2$Season)) + death.hier.c$beta2*(7.55 - mean(Avalanches_part2$Snow_total))
+proportion.deaths.post.expec.1 = invlogit(linear.comb.2c.1)
+
+prob.greater.60.1 = length(which(proportion.deaths.post.expec.1>0.6))/length(proportion.deaths.post.expec.1)#0.3736333
+expec1 = mean(proportion.deaths.post.expec.1)#0.3736608
+ci.d.1 = quantile(proportion.deaths.post.expec.1,c(0.025,0.975))
+
+#1,1,2018
+linear.comb.2c.2 = death.hier.c$`fi[1]` + death.hier.c$beta1*(2018 -mean(Avalanches_part2$Season)) + death.hier.c$beta2*(7.42 - mean(Avalanches_part2$Snow_total))
+proportion.deaths.post.expec.2 = invlogit(linear.comb.2c.2)
+prob.greater.60.2 = length(which(proportion.deaths.post.expec.2>0.6))/length(proportion.deaths.post.expec.2)#0.496
+expec2 = mean(proportion.deaths.post.expec.2)#0.5023339
+ci.d.2 = quantile(proportion.deaths.post.expec.2,c(0.025,0.975))
+
+#8,2,2015
+linear.comb.2c.3 = death.hier.c$`fi[2]` + death.hier.c$beta1*(2015 - mean(Avalanches_part2$Season)) + death.hier.c$beta2*(3.28 - mean(Avalanches_part2$Snow_total))
+proportion.deaths.post.expec.3 = invlogit(linear.comb.2c.3)
+
+prob.greater.60.3 = length(which(proportion.deaths.post.expec.3>0.6))/length(proportion.deaths.post.expec.3)#0.3737333
+expec3 = mean(proportion.deaths.post.expec.3)# 0.5001747
+ci.d.3 = quantile(proportion.deaths.post.expec.3,c(0.025,0.975))
+
+#8,2,2018
+linear.comb.2c.4 = death.hier.c$`fi[2]` + death.hier.c$beta1*(2018 - mean(Avalanches_part2$Season)) + death.hier.c$beta2*(6.05 - mean(Avalanches_part2$Snow_total))
+proportion.deaths.post.expec.4 = invlogit(linear.comb.2c.4)
+
+prob.greater.60.4 = length(which(proportion.deaths.post.expec.4>0.6))/length(proportion.deaths.post.expec.4)#0.3738333
+expec4 = mean(proportion.deaths.post.expec.4)#0.5030223
+ci.d.4 = quantile(proportion.deaths.post.expec.4,c(0.025,0.975))
+
+#10,3,2015
+linear.comb.2c.5 = death.hier.c$`fi[3]` + death.hier.c$beta1*(2015 - mean(Avalanches_part2$Season)) + death.hier.c$beta2*(2.91 - mean(Avalanches_part2$Snow_total))
+proportion.deaths.post.expec.5 = invlogit(linear.comb.2c.5)
+
+prob.greater.60.5 = length(which(proportion.deaths.post.expec.5>0.6))/length(proportion.deaths.post.expec.5)#0.4883333
+expec5 = mean(proportion.deaths.post.expec.5)# 0.5022519
+ci.d.5 = quantile(proportion.deaths.post.expec.5,c(0.025,0.975))
+
+#10,3,2018
+linear.comb.2c.6 = death.hier.c$`fi[3]` + death.hier.c$beta1*(2018 - mean(Avalanches_part2$Season)) + death.hier.c$beta2*(4.39 - mean(Avalanches_part2$Snow_total))
+proportion.deaths.post.expec.6 = invlogit(linear.comb.2c.6)
+
+prob.greater.60.6 = length(which(proportion.deaths.post.expec.6>0.6))/length(proportion.deaths.post.expec.6)# 0.4955333
+expec6 = mean(proportion.deaths.post.expec.6)#0.5043018
+ci.d.6 = quantile(proportion.deaths.post.expec.6,c(0.025,0.975))
+
+d.df = data.frame(
+  post.expectation = c(expec1,expec2,expec3,expec4,expec5,expec6),
+  prob.greater.60 = c(prob.greater.60.1,prob.greater.60.2,prob.greater.60.3,prob.greater.60.4,prob.greater.60.5,prob.greater.60.6),
+  CI_lower = c(ci.d.1[1],ci.d.2[1],ci.d.3[1],ci.d.4[1],ci.d.5[1],ci.d.6[1]),
+  CI_upwer = c(ci.d.1[2],ci.d.2[2],ci.d.3[2],ci.d.4[2],ci.d.5[2],ci.d.6[2]),
+  row.names = c("ststion1_space1_2015","ststion1_space1_2018","station8_space2_2015","station8_space2_2018","station10_space3_2015","station10_space3_2018")
+)
+round(d.df,3)
+```
+
+
+#2(e)
+```{r}
+# Data block #includes hyperparameters
+n = length(Avalanches_part2$Event_ID)
+death.hier.e.data <- list(n=n,Season=Avalanches_part2$Season,
+Snow_total=Avalanches_part2$Snow_total,hit = Avalanches_part2$Hit,
+Rec.station=Avalanches_part2$Rec.station,y.dead= Avalanches_part2$Deaths,
+J=max(Avalanches_part2$Rec.station))
+
+# Initial values
+death.hier.e.inits <- function(){
+list(fi=rnorm(max(Avalanches_part2$Rec.station), 0,runif(1,0,10)),
+beta1=rnorm(1,0,sqrt(10)),
+beta2=rnorm(1,0,sqrt(10)))
+}
+
+deathrate.e.model <- "model{
+#likelihood
+for(i in 1:n) {
+logit(mu[i]) <- fi[Rec.station[i]] + beta1*(Season[i] - mean(Season[])) + beta2*(Snow_total[i] - mean(Snow_total[]))
+y.dead[i] ~ dbin(mu[i],hit[i])
+}
+
+
+#Prior for random effect
+for(j in 1:J){
+ fi[j] ~ dnorm(0,1/pow(fi.se,2))
+}
+
+#hyperparameters and hyperprior
+beta.mu.0= 0
+beta.tau.0 = 0.1
+fi.se ~ dunif(0,10)
+
+#prior for beta
+beta1 ~ dnorm(beta.mu.0,beta.tau.0)
+beta2 ~ dnorm(beta.mu.0,beta.tau.0)
+ }"
+
+death.hier.res.e.A <- jags.model(file=textConnection(deathrate.e.model), data=death.hier.e.data, inits=death.hier.e.inits, n.chains=3, quiet = TRUE)
+update(death.hier.res.e.A, n.iter=2000) 
+death.hier.res.e.B <- coda.samples(death.hier.res.e.A,
+variable.names=c("fi","beta1","beta2"), n.iter=10000)
+```
+
+```{r}
+#MCMC Convergence Diagnostics
+
+# Trace plots and density
+plot(death.hier.res.e.B)
+
+# Brooks-Gelman-Rubin statistic (want a value near 1)
+gelman.plot(death.hier.res.e.B)
+
+#"mixing"- effective sample size given 10,000
+effectiveSize(death.hier.res.e.B[[1]][, "beta1"])
+effectiveSize(death.hier.res.e.B[[1]][, "beta2"])
+effectiveSize(death.hier.res.e.B[[1]][, "fi[1]"])
+effectiveSize(death.hier.res.e.B[[1]][, "fi[2]"])
+effectiveSize(death.hier.res.e.B[[1]][, "fi[3]"])
+
+#ACF plot
+{
+autocorr.plot(death.hier.res.e.B[[1]][, "beta1"], main = "Slope1")
+autocorr.plot(death.hier.res.e.B[[1]][, "beta2"], main = "Slope2")
+autocorr.plot(death.hier.res.e.B[[1]][,"fi[1]"], main = "random effect 1")
+autocorr.plot(death.hier.res.e.B[[1]][,"fi[2]"], main = "random effect 2")
+autocorr.plot(death.hier.res.e.B[[1]][,"fi[3]"], main = "random effect 3")
+}
+
+#look at MCMC summary
+summary(death.hier.res.e.B)
+
+death.hier.e = as.data.frame(combine.mcmc(death.hier.res.e.B))
+
+dic.c = dic.samples(model=death.hier.res.c.A,n.iter=2000,type="pD")
+dic.e = dic.samples(model=death.hier.res.e.A,n.iter=2000,type="pD")
+dic.b;dic.e
+```
+
+*
+```{r}
+#1,1,2015
+linear.comb.2e.1 = death.hier.e$`fi[1]` + death.hier.e$beta1 * (2015 - mean(Avalanches_part2$Season)) + death.hier.e$beta2 * (7.55 - mean(Avalanches_part2$Snow_total))
+proportion.deaths.post.expec.e.1 = invlogit(linear.comb.2e.1)
+
+prob.greater.60.e.1 = length(which(proportion.deaths.post.expec.e.1 > 0.6)) /
+  length(proportion.deaths.post.expec.e.1)
+expec.e.1 = mean(proportion.deaths.post.expec.e.1)
+ci.e.1 = quantile(proportion.deaths.post.expec.e.1, c(0.025, 0.975))
+
+#1,1,2018
+linear.comb.2e.2 = death.hier.e$`fi[1]` + death.hier.e$beta1 * (2018 - mean(Avalanches_part2$Season))+death.hier.e$beta2 * (7.42 - mean(Avalanches_part2$Snow_total)) 
+proportion.deaths.post.expec.e.2 = invlogit(linear.comb.2e.2)
+
+prob.greater.60.e.2 = length(which(proportion.deaths.post.expec.e.2 > 0.6)) /
+  length(proportion.deaths.post.expec.e.2)
+expec.e.2 = mean(proportion.deaths.post.expec.e.2)
+ci.e.2 =quantile(proportion.deaths.post.expec.e.2, c(0.025, 0.975))
+
+#8,2,2015
+linear.comb.2e.3 = death.hier.e$`fi[2]` + death.hier.e$beta1 * (2015 - mean(Avalanches_part2$Season)) + death.hier.e$beta2 * (3.28 - mean(Avalanches_part2$Snow_total)) 
+proportion.deaths.post.expec.e.3 = invlogit(linear.comb.2e.3)
+
+prob.greater.60.e.3 = length(which(proportion.deaths.post.expec.e.3 > 0.6)) /
+  length(proportion.deaths.post.expec.e.3)
+expec.e.3 = mean(proportion.deaths.post.expec.e.3)
+ci.e.3 =quantile(proportion.deaths.post.expec.e.3, c(0.025, 0.975))
+
+#8,2,2018
+linear.comb.2e.4 = death.hier.e$`fi[2]` + death.hier.e$beta1 * (2018 - mean(Avalanches_part2$Season))  + death.hier.e$beta2 * (6.05 - mean(Avalanches_part2$Snow_total)) 
+proportion.deaths.post.expec.e.4 = invlogit(linear.comb.2e.4)
+
+prob.greater.60.e.4 = length(which(proportion.deaths.post.expec.e.4 > 0.6)) /
+  length(proportion.deaths.post.expec.e.4)
+expec.e.4 = mean(proportion.deaths.post.expec.e.4)
+ci.e.4 =quantile(proportion.deaths.post.expec.e.4, c(0.025, 0.975))
+
+#10,3,2015
+linear.comb.2e.5 = death.hier.e$`fi[3]` + death.hier.e$beta1 * (2015 - mean(Avalanches_part2$Season))  + death.hier.e$beta2 * (2.91 - mean(Avalanches_part2$Snow_total)) 
+proportion.deaths.post.expec.e.5 = invlogit(linear.comb.2e.5)
+prob.greater.60.e.5 = length(which(proportion.deaths.post.expec.e.5 > 0.6)) /
+  length(proportion.deaths.post.expec.e.5)
+expec.e.5 = mean(proportion.deaths.post.expec.e.5)
+ci.e.5 =quantile(proportion.deaths.post.expec.e.5, c(0.025, 0.975))
+
+#10,3,2018
+linear.comb.2e.6 = death.hier.e$`fi[3]` + death.hier.e$beta1 * (2018 - mean(Avalanches_part2$Season))  + death.hier.e$beta2 * (4.39 - mean(Avalanches_part2$Snow_total)) 
+proportion.deaths.post.expec.e.6 = invlogit(linear.comb.2e.6)
+prob.greater.60.e.6 = length(which(proportion.deaths.post.expec.e.6 > 0.6)) /
+  length(proportion.deaths.post.expec.e.6)
+ci.e.6 =quantile(proportion.deaths.post.expec.e.6, c(0.025, 0.975))
+
+e.df = data.frame(
+  post.expectation = c(expec.e.1,expec.e.2,expec.e.3,expec.e.4,expec.e.5,expec.e.6),
+  CI_lower = c(ci.e.1[1],ci.e.2[1],ci.e.3[1],ci.e.4[1],ci.e.5[1],ci.e.6[1]),
+  CI_upwer = c(ci.e.1[2],ci.e.2[2],ci.e.3[2],ci.e.4[2],ci.e.5[2],ci.e.6[2]),
+  row.names = c("ststion1_space1_2015","ststion1_space1_2018","station8_space2_2015","station8_space2_2018","station10_space3_2015","station10_space3_2018")
+)
+e.df
+
+dic.2c<- dic.samples(model=death.hier.res.c.A,n.iter=10000,type="pD")
+dic.2e<- dic.samples(model=death.hier.res.e.A,n.iter=10000,type="pD")
+diffdic(dic.2c,dic.2e)#positive, the latter one is prefered
+```
